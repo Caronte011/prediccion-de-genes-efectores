@@ -1,0 +1,1211 @@
+#!/bin/bash
+
+TIEMPO=false
+DESCOMPRIMIR_GENOMA=false
+DESCOMPRIMIR_STATS=false
+EXTRAER_TAXID=false
+RENOMBRAR_GENOMA=false
+RENOMBRAR_STATS=false
+CREAR_TAXMAP=false
+CREAR_DB=false
+BLAST=false
+CONCATENAR=false
+OBTENER_NA=false
+SUSTITUIR_NA=false
+CREAR_LISTAS=false
+CREAR_FASTA=false
+
+ORTHOMCLCOMPLIANTFASTA=false
+ORTHOMCL_CREAR_TAXMAP=false
+ORTHOMCLFILTERFASTA=false
+CREAR_ORTHOMCL_DB=false
+ORTHOMCL_BLAST=false
+ORTHOMCL_BLAST_PARSER=false
+ORTHOMCL_DAR_FORMATO=false
+ORTHOMCLLOADBLAST=false
+
+ORTHOFINDER_PREPARAR_FASTAS=false
+ORTHOFINDER=false
+MOVER=false
+COPIAR_ARBOLES=false
+FILTRAR_ARBOLES=false
+CONCATENAR_NEWICK=false
+MAPA_GENES=false
+
+#nombre de la base de datos:
+DB="nematoda"
+#nombre assembly
+nom_asse="ncbi-genomes-2021-02-18"
+
+################################################################################
+<<Comentario
+TIEMPO
+Establece el tiempo en que tardo en ejecutarse cada función.
+Comentario
+
+function tiempo {
+    if [ $TIEMPO == true ];  then
+        if (( $segundos > 3600 )) ; then
+            let "horas=segundos/3600"
+            let "minutos=(segundos%3600)/60"
+            let "segundos=(segundos%3600)%60"
+            echo "$orden completado en $horas hora(s), $minutos minuto(s) y $segundos segundo(s)" 
+        elif (( $segundos > 60 )) ; then
+            let "minutos=(segundos%3600)/60"
+            let "segundos=(segundos%3600)%60"
+            echo "$orden completado en $minutos minuto(s) y $segundos segundo(s)"
+        else
+            echo "$orden completado en $segundos segundos"
+        fi
+        TIEMPO=false
+    fi
+}
+
+################################################################################
+<<Comentario
+DESCOMPRIMIR:
+Descomprime el archivo que contiene los genomas: genome_assemblies.tar en la carpeta assemblies.
+Luego descomprime todos los archivos con extensión .gz contenidos en el comprimido original.
+Comentario
+
+if [ $DESCOMPRIMIR_GENOMA == true ]; then
+    inicio=$SECONDS
+    cd datos
+    mkdir assemblies
+    tar -xvf genome_assemblies_genome_fasta.tar -C assemblies      
+    for carpeta in ncbi-genomes*; do                
+        rm assemblies/report.txt
+        cd assemblies/$carpeta
+        for gz in *.gz; do
+            gzip -d $gz                
+        done
+        cd ../
+    done
+    cd ../../
+    orden="descomprimir"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+    DESCOMPRIMIR=false
+fi
+
+if [ $DESCOMPRIMIR_STATS == true ]; then
+    inicio=$SECONDS
+    cd datos
+    mkdir -p assemblies/assemblies_stats
+    tar -xvf genome_assemblies_asm_stats.tar -C assemblies/assemblies_stats     
+    cd ../
+    orden="descomprimir"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+    DESCOMPRIMIR=false
+fi
+
+################################################################################
+<<Comentario
+EXTRAER_TAXID:
+Del archivo assembly_stats correspondiente a cada organismo, extrae el taxid, Genbank_ID, género y especie. Los datos se almacenan en una lista csv llamada datos_genomas. 
+Comentario
+
+if [ $EXTRAER_TAXID == true ]; then
+    inicio=$SECONDS
+    r1="datos/assemblies/assemblies_stats/$nom_asse"
+    encabezado="genero,especie,GenBank,TaxId"
+    echo -e "$encabezado" >> datos/datos_genomas.csv
+    salir="../../../"
+    cd $r1
+
+    for assembly in *assembly_stats.txt; do        
+        assembly1="$(echo "$assembly" |sed 's/_/ /g' |awk '{print $1"_"$2}')"         
+        GenBank="$(grep 'GenBank assembly' $assembly |awk '{print $5}'|sed -e "s/\r//")"        
+        taxid="$(grep 'Taxid' $assembly |awk '{print $3}'|sed -e "s/\r//")"
+        genero="$(grep 'Organism' $assembly |awk '{print $4}')"
+        sp2="$(grep 'Organism' $assembly |awk '{print $5 $6}' )"
+        especie="$(grep 'Organism' $assembly |awk '{print $5 }' )"   
+        sp="$(echo "$sp2" |grep "sp\."  |sed 's/sp\./sp_/g')"        
+        nada=""
+        
+        if [ "$sp" != "$nada" ]; then
+            #Crea una lista con los genomas que se van a utilizar.        
+            echo -e "$genero,$sp2,$GenBank,$taxid" >> "$salir"datos_genomas.csv              
+        else    
+            echo -e  "$genero,$especie,$GenBank,$taxid" >> "$salir"datos_genomas.csv            
+        fi                
+
+    done
+    cd ../$salir
+    orden="Extraer TaxID"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    EXTRAER_TAXID=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+RENOMBRAR_GENOMA  
+Compara las accesiones del archivo "datos_genomas.csv" con las accesiones en el inicio del nombre de cada archivo fna en assemblies. Luego se renombra el archivo con el nombre científico para su rápida identificación. 
+Comentario
+
+if [ $RENOMBRAR_GENOMA == true ]; then 
+    inicio=$SECONDS    
+    r1="datos/assemblies/$nom_asse"
+    salir="../../../"
+    cd $r1
+    for assembly in *.fna; do
+        GenBank_ID="$(echo $assembly|sed 's/_/ /g' |awk '{print $1"_"$2}')"
+        echo "$GenBank_ID"
+        while IFS= read linea;  do
+            acc2="$(echo $linea |awk -F',' '{print $3}')" 
+            nombre="$(echo $linea |awk -F',' '{print $1"_"$2}')"
+            
+            if [ "$GenBank_ID" == "$acc2" ]; then
+             mv  $assembly $nombre.fna
+            fi
+        done < ../../datos_genomas.csv
+    done
+    cd $salir
+    
+    orden="RENOMBRAR_GENOMA"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    RENOMBRAR_GENOMA=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+RENOMBRAR_STATS 
+Compara las accesiones del archivo "datos_genomas.csv" con las accesiones en el inicio del nombre de cada archivo assembly_stats.txt en assemblies. Luego se renombra el archivo con el nombre científico para su rápida identificación. 
+Comentario
+
+if [ $RENOMBRAR_STATS == true ]; then 
+    inicio=$SECONDS    
+    r1="datos/assemblies/assemblies_stats/$nom_asse"
+    salir="../../../../"
+    cd $r1
+    for assembly in *assembly_stats.txt; do
+        GenBank_ID="$(echo $assembly|sed 's/_/ /g' |awk '{print $1"_"$2}')"
+        echo "$GenBank_ID"
+        while IFS= read linea;  do
+            acc2="$(echo $linea |awk -F',' '{print $3}')" 
+            nombre="$(echo $linea |awk -F',' '{print $1"_"$2}')"
+            
+            if [ "$GenBank_ID" == "$acc2" ]; then
+             mv  $assembly $nombre.txt
+            fi
+        done < ../../../datos_genomas.csv
+    done
+    cd $salir
+    
+    orden="RENOMBRAR_STATS"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    RENOMBRAR_STATS=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+CREAR_TAXMAP:
+De cada uno de los genomas extrae la accesión de cada conting. Los guarda en una lista para cada genoma y los almacena en la carpeta contings. Al final crea una lista única con los contigs de todos los genomas. En la columna uno de la lista están las accesiones de los contings y en la columna dos el taxid de la especie. Esta lista es la que se utilizará para la creación de la base de datos
+Comentario
+
+if [ $CREAR_TAXMAP == true ]; then 
+    inicio=$SECONDS
+    mkdir -p datos/mapa_contigs
+    cd datos/assemblies/$nom_asse
+    
+    for genoma in *.fna; do
+        genoma2=${genoma%.*}
+        salir="../../"
+        ruta="mapa_contigs/contigs_$genoma2"
+        accesion="$(grep '>' $genoma |sed 's/>//g' |awk '{print $1}')"
+        while IFS= read -r linea; do
+            especie="$(echo "$linea" |awk -F',' '{print $1"_"$2}')"
+            taxid="$(echo "$linea" |awk -F',' '{print $4}')"                        
+        
+            if [ $genoma2 == $especie ]; then    
+                echo "$accesion" >> "$salir"$ruta.temp
+                awk -v a=$taxid '{print $1"\t"a}' "$salir"$ruta.temp >> "$salir"$ruta.csv
+                rm "$salir"$ruta.temp
+            fi  
+        done < "$salir"datos_genomas.csv
+    done
+    cd "$salir"mapa_contigs
+    
+    for contigs in *.csv; do
+        cat $contigs  >> ../"$DB"_taxid_map.csv
+    done
+    cd $salir
+    pwd
+    orden="Crear Taxmap"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    CREAR_TAXMAP=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+CREAR_DB:
+Para que la base de datos esté anotada es necesario descargar el taxdb ftp://ftp.ncbi.nlm.nih.gov/blast/db/taxdb.tar.gz El taxdb utilizado se descargó el 18/febrero/2021.
+El archivo comprimido contiene dos documentos llamados taxdb.btd y taxdb.bti. Estos deben copiarse dentro de la carpeta base_de_datos. (O donde esté configurada la base de datos en el sistema operativo.)
+Comentario
+
+if [ $CREAR_DB == true ];	then
+    inicio=$SECONDS
+    taxmap="datos/$DB"_taxid_map.csv
+    salir="../../../"
+    r1="BLASTDB/$DB"
+    r2="datos/assemblies/$nom_asse"    
+    mkdir  -p $r1
+    cd $r2
+    
+    for genoma in *.fna; do
+        genoma2=${genoma%.*}  
+        mkdir  "$salir"$r1/$genoma2
+        makeblastdb -in $genoma -parse_seqids -taxid_map "$salir"$taxmap -blastdb_version 5 -title $DB -dbtype nucl -out "$salir"$r1/$genoma2/$genoma2 
+    done
+    cd "$salir"
+    orden="Crear base de datos"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    CREAR_DB=false
+    tiempo
+fi
+
+###############################################################################
+<<Comentario
+BLAST:
+Realiza el Blast
+Comentario
+
+if [ $BLAST == true ]; then
+    inicio=$SECONDS    
+    #Es el tipo de formato del blast
+    view="6"
+    outfmt="outfmt_$view"    
+    
+    #Este es el formato del blast, lo que se espera aparezca en los resultados del blast.
+    format="qacc qlen sacc sseqid evalue bitscore score qcovs pident qcovhsp slen qstart qend sstart send length  nident mismatch positive gapopen gaps ppos frames sframe staxid ssciname scomname qseq sseq btop"
+
+    r1="resultados_blast/$DB/resultados_brutos"
+    r2="BLASTDB/$DB"
+    mkdir -p datos/$r1
+    cd datos/genes
+
+    for gen in *.fasta; do
+        gen1=${gen%.*}
+        echo "$gen1"
+        mkdir -p ../$r1/$gen1
+        cd ../../$r2
+        for db in * ; do
+        #echo "$db"
+            query="../../datos/genes/$gen"
+            out="../../datos/$r1/$gen1/$db.csv"            
+            tblastn -db "$DB/$db/$db" -query $query -outfmt "$view delim=, $format" -num_threads 16 -out $out
+        done
+        cd ../../datos/genes
+    done
+    cd ../../
+
+    #Borra los archivos vacios
+    cd datos/$r1
+    find -type f -empty -delete
+    cd ../../
+    BLAST=false
+    orden="blast"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+CONCATENAR:
+Los resultados del BLAST se filtran primero por score >= 200, porcentaje de query >= 60 y porcentaje de identidad >= 60. Los resultados filtrados se concatenan en archivos csv únicos para cada gen. Cada archivo contiene los hits que obtuvo contra todos los genomas.  (Debido a que algunos organismos no se encuentran en taxdb, se crean archivos con extensión temp2 para ser corregidos en pasos posteriores).
+Comentario
+
+if [ $CONCATENAR == true ]; then
+    inicio=$SECONDS
+    #Los resultados del blast se filtran primero por:
+    score="200"
+    por_query="60"
+    por_id="60"
+    
+    r1="datos/resultados_blast/$DB/resultados_brutos"
+    cd $r1
+    mkdir -p ../concatenado
+    
+    for gen in *; do
+        cd $gen
+        for hits in *.csv; do
+            cat $hits >> ../../concatenado/$gen.temp
+        done
+        cd ../
+    done
+    cd ../concatenado
+
+    for blast_gen in *.temp; do
+        blast_gen2=${blast_gen%.*}
+        cat $blast_gen |awk -F"," -v a="$score" -v b="$por_query" -v c="$por_id" '{
+        if ($7 >=a && $8 >=b && $9 >=c) {print $0}}' >> $blast_gen2.temp2
+
+        rm $blast_gen
+        find -type f -empty -delete
+    done
+    cd ../$salir
+    CONCATENAR=false
+    orden="Concatenar"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+################################################################################
+<<COMENTARIO
+#OBTENER_NA
+Algunos organismos no aparecen en taxdb. Por lo que en los resultados del BLAST correspondientes al nombre científico y común aparece como N/A. Debido al "/", al momento de crear las carpetas con estos nombres marca error, por lo que no se incluyen los datos en los resultados. Para solucionarlo, con este script se filtran los resultados donde aparece N/A en la columna correspondiente, y de este resultado toma las primeras cuatro letras de la accesión del organismo y almacena solo los resultados únicos en el archivo lista_na.csv. Manualmente se busca en NCBI las accesiones con la especie faltante y se agregan al archivo lista_na.csv en su renglón correspondiente. Posteriormente se procede con la sustitución en los resultados del BLAST. 
+
+Los organismos con este inconveniente son:
+    JACM    Bunonema	sp_RGD898
+    JADL    Steinernema 	khuongi
+    LR54    Caenorhabditis	sp_26
+    LR56    Caenorhabditis	sp_39
+    NC_0   Caenorhabditis	elegans
+    NIUQ    	Plectus	sambesii
+    SCGM    Rhabditida	sp_S2_005
+    SWDT    Halicephalobus	mephisto
+    VOSH    Trichinella	sp_17WV049-YT159 
+COMENTARIO
+
+if [ $OBTENER_NA == true ]; then
+    salir="../../../../"
+   r1="datos/resultados_blast/$DB/concatenado"
+    cd $r1
+    mkdir -p ../listas
+    for lista in *.temp2; do
+        #Orden para obtener las accesiones únicas de organismos con N/A
+        awk -F',' '$26~/N\/A/' $lista |awk -F',' '{print $3}' |sort -u >> ../listas/lista_na.temp        
+    done
+    cd ../listas
+    sort -u lista_na.temp >> lista_na.csv
+    rm lista_na.temp
+    cd $salir
+fi
+
+################################################################################
+<<Comentario
+SUSTITUIR_NA 
+Ya con la lista de los nombres científicos, finalmente se crean los archivos CSV donde se reemplazan los caracteres N/A con el nombre científico correspondiente. Se eliminan los archivos temp2. 
+Comentario
+
+if [ $SUSTITUIR_NA == true ]; then
+    inicio=$SECONDS
+    salir="../../../../"
+    r1="datos/resultados_blast/$DB/concatenado"
+    cd $r1
+
+    for gen in *.temp2; do
+        gen2=${gen%.*}
+        grep -v 'N/A' $gen >> $gen2.csv
+        awk -F',' '$26~/N\/A/' $gen >> temp_$gen2.csv
+
+        while IFS= read linea;	do
+            acc="$(echo "$linea" |awk '{print $1}')"
+            org="$(echo "$linea" |awk '{print $2" "$3}')"
+            while IFS= read linea2; do
+                acc2="$(echo "$linea2" |awk -F',' '{print $3}')"
+                if [ "$acc" == "$acc2" ]; then
+                    echo "$linea2" |awk -F',' -v a="$org" 'BEGIN {
+                    OFS = "," } {($26 = a); ($27 = a); print $0}' >> $gen2.csv
+                fi
+            done < temp_$gen2.csv
+        done < ../listas/lista_na.csv
+        rm temp_$gen2.csv
+        rm $gen
+    done
+    
+    cd $salir    
+    SUSTITUIR_NA=false
+    orden="SUSTITUIR_NA"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+################################################################################
+<<Comentario
+CREAR_LISTAS 
+Crea varias listas con los organismos donde hubo hits y los hits únicos por organismo. 
+Comentario
+
+if [ $CREAR_LISTAS == true ]; then
+    inicio=$SECONDS
+    encabezado="query acc.,query length,subject acc.,subject id,evalue,bit score,score,% query coverage per subject,% identity,% query coverage per High scoring Segment Pair ,subject length,q. start,q. end,s. start,s. end,alignment length,identical,mismatches,positives,gap opens,gaps,% positives,query/sbjct frames,sbjct frame,subject tax id,subject sci name,subject com names,query seq,subject seq,BTOP"
+    encabezado_organismos="subject tax id,subject sci name,subject com names"
+    encabezado_genoma="subject tax id,subject sci name,subject com names,query acc.,query com names,query length,query seq"
+    encabezado_gen="common name,query acc.,query length,subject tax id,subject sci name,query seq"
+    hits_a="hits_unicos_por_gen"
+    hits_b="hits_unicos_por_organismo"
+    r1="datos/resultados_blast/$DB"
+    salir="../../../"
+
+    cd $r1
+    mkdir -p listas
+    mkdir -p $hits_a/xlsx
+    mkdir -p $hits_b/xlsx
+
+    echo -e "$encabezado\n\n" >> listas/blast_$DB.xlsx
+    cd concatenado
+    for gen in *.csv; do
+        nombre=${gen%.*}
+        echo -e "$encabezado_gen\n\n" >> ../$hits_a/xlsx/$nombre.xlsx
+        sort -u -t, -k 26,26 $gen |awk -F"," -v a=$nombre '{
+        print a","$1","$2","$25","$26","$28}' |tee -a ../$hits_a/xlsx/$nombre.xlsx >> ../$hits_a/$nombre.csv
+        head -1 $gen |tail -1 |awk -F',' -v a=$nombre '{print $1"\t"a }' >> ../listas/lista_genes.txt
+        cat $gen |tee -a ../listas/blast_$DB.csv >> ../listas/blast_$DB.xlsx
+    done
+    cd ../
+
+    #Crea una lista con los organismos donde hubo hits.
+    echo -e "$encabezado_organismos\n\n" >> listas/hits_genomas.xlsx
+    sort -u -t, -k 26,26 listas/blast_$DB.csv |
+    awk -F"," '{print $25","$26","$27}' |tee -a listas/hits_genomas.xlsx >> listas/hits_genomas.csv
+
+    #Crea una lista con los hits únicos por organismo.
+    ord1="s/sp\./sp/g; s/ /_/g; s/-/_/g"
+    while IFS= read linea; do
+        taxid="$(echo "$linea"  |awk -F"," '{print $1}')"
+        org_a="$(echo "$linea" |awk -F',' '{print $2}'|awk '{print $1" "$2"_"$3}' |sed -e "$ord1")"
+        org_b="$(echo "$linea" |awk -F',' '{print $2}'|awk '{print $1" "$2}' |sed -e "$ord1")"
+
+        if [[ $linea == *"sp."* ]]; then
+            echo -e "$encabezado_genoma\n\n" >> $hits_b/xlsx/$org_a.xlsx
+            grep "$taxid" listas/blast_$DB.csv |sort -u -t, -k 1,1 |awk -F"," -v a="$org_a" '{
+            print $25","a","$27","$1","$2","$28}' >> $hits_b/$org_a.temp
+        else
+            echo -e "$encabezado_genoma\n\n" >> $hits_b/xlsx/$org_b.xlsx
+            grep "$taxid" listas/blast_$DB.csv |sort -u -t, -k 1,1 |awk -F"," -v a="$org_b" '{
+            print $25","a","$27","$1","$2","$28}' >> $hits_b/$org_b.temp
+        fi
+    done < listas/hits_genomas.csv
+
+    #Agrega el nombre del gen.
+    cd $hits_b
+    for org in *.temp; do
+        org2=${org%.*}
+        while IFS= read linea1; do
+            acc1="$(echo "$linea1" |awk -F"," '{print $4}')"
+
+            while IFS= read linea2; do
+                acc2="$(echo "$linea2" |awk '{print $1}')"
+                if [ "$acc1" == "$acc2" ]; then
+                    nombre="$(echo "$linea2" |awk '{print $2}')"
+                    echo "$linea1" |awk -F"," -v a="$nombre" '{print $1","$2","$3","$4","a","$5","$6}' |
+                    tee -a xlsx/$org2.xlsx >> $org2.csv
+                fi
+            done < ../listas/lista_genes.txt			
+        done < $org
+        rm $org
+    done
+    cd ../
+
+    #remueve los archivos vacíos
+    for vacio in concatenado $hits_a $hits_b; do
+        find ./$vacio -type f -empty -delete
+
+        #Los archivos vacíos de los genomas ya se habían eliminado durante el blast
+        if [ "$vacio" != "$hits_b" ]; then
+            #88 bits es lo que pesa solo el encabezado
+            find ./$vacio -type f -name '*.xlsx'  -size 88c -delete
+        fi
+    done
+    cd $salir
+    CREAR_LISTAS=false
+    orden="CREAR_LISTAS"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+CREAR_FASTA 
+Crea los archivos fasta de las secuencias que dieron hit, tanto para las secuencias correspondientes al gen como para las correspondientes al genoma. ncias que dieron hit, tanto para las secuencias correspondientes al gen como para las correspondientes al genoma. Subject= al genoma y query = al gen.
+Adicionalmente, se preparan los archivos fasta de acuerdo a las indicaciones de OrthoMCL: Un archivo fasta que contiene el taxon_code y el ID de la secuencia.
+Comentario
+
+if [ $CREAR_FASTA == true ]; then
+    inicio=$SECONDS
+    salir="../../../../"
+    r1="datos/resultados_blast/$DB/concatenado"
+    cd $r1
+
+    ord1="s/sp\./sp/g; s/ /_/g; s/-/_/g"
+    for gen in *.csv; do	
+        nombre=${gen%.*}
+        r2="../fastas/$nombre/gen"
+        r3="../fastas/$nombre/genoma"
+        r2b="$(echo -e "$salir"my_orthomcl_dir/compliantFasta/gen/$nombre)"
+        r3b="$(echo -e "$salir"my_orthomcl_dir/compliantFasta/genoma/$nombre)"
+
+        cont=1
+        mkdir -p $r2
+        mkdir -p $r3
+        mkdir -p $r2b
+        mkdir -p $r3b
+
+        while IFS= read linea; do
+            org="$(echo "$linea" |awk -F',' '{print $26}' |sed -e "$ord1")"
+            genero="$(echo "$linea" |awk -F',' '{print $26}'|awk  '{print $1}')"
+            especie="$(echo "$linea" |awk -F',' '{print $26}'|awk  '{print $2}')"
+            genero1=${genero:0:1}
+            org2="$(echo -e "$genero1"_"$especie")"
+            gen_id="$(echo "$linea" |awk -F',' '{print $1}')"
+            encabezado_fasta="$(echo "$linea" |awk -F',' -v a="$nombre" 'BEGIN {
+                        OFS = "|" } {print ">"$1 "\t|" a "\t|query_length " $2 "\t|subject_acc " $3 "\t|score " $7 "\t|%_query_coverage " $8 "\t|%_identity " $9 "\t|q_start " $12 "\t|q_end " $13 "\t|s_start " $14 "\t|s_end " $15 "\t|alignment_length " $16 "\t|identical " $17 "\t|mismatches " $18 "\t|subject_taxID " $25 "\t"}')"
+
+            echo  -e "$encabezado_fasta"\|"$org" |tee -a $r2/$cont'_'$nombre.fasta >> $r3/$cont'_'$nombre.fasta
+            #encabezado_orthoMCL
+            echo  "$cont"_"$nombre"\|"$gen_id"\|"$org2" |tee -a $r2b/$cont'_'$nombre.fasta >> $r3b/$cont'_'$nombre.fasta
+
+            #Elimina los guiones de las secuencias  y divide la secuencia en lineas de 70 caracteres.
+            echo "$linea" |awk -F',' '{print $28}' |sed -e 's/-//g' |sed -e 's/.\{69\}/&\n/g' >> $r2/$cont'_'$nombre.fasta
+            echo "$linea" |awk -F',' '{print $29}' |sed -e 's/-//g' |sed -e 's/.\{69\}/&\n/g' >> $r3/$cont'_'$nombre.fasta
+
+            echo "$linea" |awk -F',' '{print $28}' |sed -e 's/-//g' |sed -e 's/.\{69\}/&\n/g' >> $r2b/$cont'_'$nombre.fasta
+            echo "$linea" |awk -F',' '{print $29}' |sed -e 's/-//g' |sed -e 's/.\{69\}/&\n/g' >> $r3b/$cont'_'$nombre.fasta
+
+            ((cont++))
+        done < $gen
+    done
+    cd $salir
+
+    CREAR_FASTA=false
+    orden="Creación archivos fasta"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+################################################################################
+
+<<Comentario
+ORTHOMCLCOMPLIANTFASTA
+Comentario
+
+if [ $ORTHOMCLCOMPLIANTFASTA == true ];	then
+    inicio=$SECONDS
+    salir="../../../../"
+    r1="datos/resultados_blast/$DB/concatenado"
+    cd $r1
+
+    for gen in *.csv; do
+        nombre=${gen%.*}
+        r2="$(echo -e "$salir"my_orthomcl_dir/compliantFasta/$nombre)"
+        cont=1
+        mkdir -p $r2
+        while IFS= read linea; do
+            taxid="$(echo "$linea" |awk -F',' '{print $25}')"
+            echo -e ">$taxid"\|"$cont"_"$nombre" >> $r2/$taxid.fasta
+            echo "$linea" |awk -F',' '{print $28}' |sed -e 's/-//g'  >> $r2/$taxid.fasta
+            ((cont++))
+        done < $gen
+    done
+    cd $salir
+
+    orden="ORTHOMCLCOMPLIANTFASTA"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOMCLCOMPLIANTFASTA=false
+    tiempo
+fi
+
+################################################################################
+
+<<Comentario
+ORTHOMCL_CREAR_TAXMAP:
+De cada uno de los genomas extrae la accesión de cada conting. Los guarda en una lista para cada genoma y los almacena en la carpeta contings. Al final crea una lista única con los contigs de todos los genomas. En la columna uno de la lista están las accesiones de los contings y en la columna dos el taxid de la especie. Esta lista es la que se utilizará para la creación de la base de datos
+Comentario
+
+if [ $ORTHOMCL_CREAR_TAXMAP == true ]; then
+    inicio=$SECONDS
+    r1=" my_orthomcl_dir/compliantFasta"
+    salir="../../"
+    nada=""
+    cd $r1
+
+    for gen in *; do
+        echo $gen
+        cd $gen
+        for fasta in *.fasta; do
+            while IFS= read linea; do
+                taxid="$(echo "$linea" |grep '>'|sed -e 's/>//g'  |awk -F'|' '{print $1}')"
+                gen_id="$(echo "$linea" |grep '>'|sed -e 's/>//g'  |awk -F'|' '{print $0}')"
+
+                    if [ "$taxid" != "$nada" ]; then
+                        echo "$linea" |grep '>'|sed -e 's/>//g'  |awk -F'|' '{print $2"\t"$1}'  >>$salir../datos/ortorthomcl_taxid_map.csv
+                        echo -e "$gen_id\t$taxid" >> $salir../datos/ortorthomcl_taxid_map.csv
+                    fi
+
+            done < $fasta
+        done
+        cd ../
+    done
+    cd $salir
+
+    orden="ORTHOMCL_CREAR_TAXMAP"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOMCL_CREAR_TAXMAP=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+ORTHOMCLFILTERFASTA
+Para que funcione es necesario crear la base de datos de orthomcl. Para crear la base de datos de orthomcl, solo hay que ejecutar desde MySQL: source: orthomclInstallSchema.sql. Se tiene que agregar la ruta completa al archivo. Adicionalmente, se requiere que la base de datos esté abierta antes de ejecutar el script orthomclFilterFasta.
+
+"Create goodProteins.fasta containing all good proteins and rejectProteins.fasta containing all rejects.  Input is a directory containing a set of compliant input .fasta files (as produced by orthomclAdjustFasta).
+
+Usage:
+  orthomclFilterFasta input_dir min_length max_percent_stops [good_proteins_file poor_proteins_file]
+
+where:
+  input_dir:               a directory containing a set of .fasta files
+  min_length:              minimum allowed length of proteins.  (suggested: 10)
+  max_percent_stop:        maximum percent stop codons.  (suggested 20)
+  good_proteins_file:      optional.  By default goodProteins.fasta in the current dir.
+  poor_proteins_file:      optional.  By default poorProteins.fasta in the current dir.
+
+EXAMPLE: orthomclSoftware/bin/orthomclFilterFasta my_orthomcl_dir/compliantFasta 10 20"
+Comentario
+
+if [ $ORTHOMCLFILTERFASTA == true ]; then
+    inicio=$SECONDS
+    ruta_script="programas/orthomclSoftware-v2.0.9/utilizados"
+    script="03_orthomclFilterFasta"
+    perl_script="$ruta_script/$script"
+    min_length=10
+    max_percent_stop=20
+    salir="../../"
+
+    cd my_orthomcl_dir/compliantFasta
+    gp="$(echo -e ../good_proteins)"
+    pp="$(echo -e ../poor_proteins)"
+    mkdir -p $gp
+    mkdir -p $pp
+
+    for secuencia in *; do
+        input_dir="$(echo -e "$secuencia")"
+        good_proteins="$(echo -e $gp/"$secuencia".fasta)"
+        poor_proteins="$(echo -e $pp/"$secuencia".fasta)"
+
+        orden="$(echo -e  "$salir"$perl_script $input_dir 10 20 $good_proteins $poor_proteins)"
+        perl $orden
+
+    done
+    cd $salir
+
+    #remueve los archivos vacíos.
+    cd my_orthomcl_dir
+    for vacio in poor_proteins good_proteins; do
+        find ./$vacio -type f -empty -delete
+    done
+    cd $salir
+
+    ORTHOMCLFILTERFASTA=false
+    orden="ORTHOMCLFILTERFASTA"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+CREAR_ORTHOMCL_DB
+Comentario
+
+if [ $CREAR_ORTHOMCL_DB == true ];	then
+    inicio=$SECONDS
+    DB="ORTHOMCL_DB"
+    taxmap="datos/ortorthomcl_taxid_map.csv"
+    salir="../../"
+    r1="BLASTDB/$DB"
+    r2="my_orthomcl_dir/good_proteins"
+    cd $r2
+
+    for lista in *.fasta; do
+        lista2=${lista%.*}
+        mkdir -p "$salir$r1/$tipo/$lista2"
+        makeblastdb -in $lista -parse_seqids -taxid_map  "$salir"$taxmap -blastdb_version 5 -title $lista2 -dbtype prot -out $salir$r1/$lista2/$lista2
+    done
+
+    cd "$salir"
+    orden="CREAR_ORTHOMCL_DB"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    CREAR_DB=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+ORTHOMCL_BLAST
+Comentario
+
+if [ $ORTHOMCL_BLAST == true ]; then
+    inicio=$SECONDS
+    #Es el tipo de formato del blast
+    view="6"
+    outfmt="outfmt_$view"
+    DB="ORTHOMCL_DB"
+
+    #Este es el formato del blast, lo que se espera aparezca en los resultados del blast.
+    format="qacc qlen sacc sseqid evalue bitscore score qcovs pident qcovhsp slen qstart qend sstart send length  nident mismatch positive gapopen gaps ppos frames sframe staxid ssciname scomname qseq sseq btop"
+   #format="qacc  sacc pident length mismatch gaps qstart qend sstart send evalue bitscore"
+    #query_id, subject_id, query_taxon, subject_taxon, evalue_mant, evalue_exp, percent_ident, percent_match
+    #query_name, hitname, pcid, len, mismatches, ngaps, start('query'), end('query'), start('hit'), end('hit'), evalue, bits
+
+    r1="my_orthomcl_dir/good_proteins"
+    r2="BLASTDB/$DB"
+    r3="my_orthomcl_dir/resultados_blast"
+    salir="../../"
+
+    mkdir -p datos/$r3
+    cd $r1
+
+    for lista in *.fasta; do
+        lista2=${lista%.*}
+        echo "$lista2"
+        mkdir -p ../resultados_blast/$lista2
+        cd $salir"$r2"
+        for db in * ; do
+            query="$salir$r1/$lista"
+            out="$salir"/$r3/$lista2/$db.csv
+            blastp -db "$DB/$db/$db" -query $query -outfmt "$view delim=, $format" -num_threads 16 -out $out
+        done
+        cd $salir"$r1"
+    done
+    cd $salir
+
+    #remueve los archivos vacíos.
+    for vacio in my_orthomcl_dir/resultados_blast; do
+        find ./$vacio -type f -empty -delete
+    done
+
+    ORTHOMCL_BLAST=false
+    orden="ORTHOMCL_BLAST"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    tiempo
+fi
+
+################################################################################
+
+<<Comentario
+ORTHOMCL_BLAST_PARSER
+Input:
+  - your_blast_results_in_tab_format
+  - my_orthomcl_dir/compliantFasta/
+Output:
+  - my_orthomcl_dir/similarSequences.txt
+
+This step parses NCBI BLAST -m 8 output into the format that can be loaded into the orthomcl database.
+
+Use the orthomclBlastParser program for this.   In addition to formatting, it computes the percent match of each hit, which is tricky (see the perl code if you are a super-power user.)
+
+orthomclBlastParser my_blast_results compliantFasta >> similarSequences.txt
+
+IMPORTANT NOTE: the size of this file determines the disk space required by the relational database.  You will need 5x the size of this file.  Please see the oracleConfigGuide or mysqlConfigGuide now that you know the size of this file.
+
+Comentario
+
+if [ $ORTHOMCL_BLAST_PARSER == true ];	then
+    inicio=$SECONDS
+    ruta_script="programas/orthomclSoftware-v2.0.9/utilizados"
+    script="04_orthomclBlastParser"
+    perl_script="$(echo "$ruta_script/$script")"
+    r1="my_orthomcl_dir/resultados_blast"
+    r2="my_orthomcl_dir/compliantFasta"
+    r3=" my_orthomcl_dir/similarSequences"
+    salir="../../../"
+
+    cd $r1
+    for gen in *;do
+        mkdir -p ../similarSequences/$gen
+        cd $gen
+        imput2="$(echo "$r2/$gen")"
+        Output="$(echo -e "$r3/$gen/$gen.txt")"
+
+        for secuencia in *.csv; do
+            imput1="$(echo "$r1/$gen/$secuencia")"
+            cd $salir
+            perl $perl_script $imput1 $imput2 $Output
+            cd $r1/$gen
+        done
+        cd ../
+    done
+    cd $salir
+
+
+    orden="ORTHOMCL_BLAST_PARSER"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOMCL_BLAST_PARSER=false
+    tiempo
+fi
+
+################################################################################
+<<Comentario
+ORTHOMCL_DAR_FORMATO
+
+Comentario
+if [ $ORTHOMCL_DAR_FORMATO == true ];	then
+    inicio=$SECONDS
+    r1="my_orthomcl_dir/resultados_blast"
+    mkdir -p "my_orthomcl_dir/similarSequences"
+    salir="../../"
+    r3="similarSequences"
+    cd $r1
+    for gen in *; do
+        cd $gen
+            for csv in $gen*.csv; do
+                while IFS= read linea;  do
+                    query_id="$(echo "$linea" |awk -F',' '{print $1}'| sed 's/|/ /g' |awk '{print $2}')"
+                    subject_id="$(echo "$linea" |awk -F',' '{print $3}'| sed 's/|/ /g' | sed 's/_/ /g' |awk '{print $2"_"$3}')"
+                    query_taxon="$(echo "$linea" |awk -F',' '{print $1}'| sed 's/|/ /g' |awk '{print $1}')"
+                    subject_taxon="$(echo "$linea" |awk -F',' '{print $3}' | sed 's/|/ /g' | sed 's/_/ /g' |awk '{print $1}')"
+                    evalue_mant="$(echo "$linea" |awk -F',' '{print $5}')"
+                    evalue_exp="$(echo "$linea" |awk -F',' '{print $6}')"
+                    percent_ident="$(echo "$linea" |awk -F',' '{print $9}')"
+                    percent_match="$(echo "$linea" |awk -F',' '{print $8}')"
+                    echo "$query_id, $subject_id, $query_taxon, $subject_taxon, $evalue_mant, $evalue_exp, $percent_ident, $percent_match" >> $salir$r3/$gen.csv
+                done < $csv
+            done
+        cd ../
+    done
+    cd $salir
+
+    orden="ORTHOMCL_DAR_FORMATO"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOMCL_DAR_FORMATO=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+ORTHOMCLLOADBLAST
+Load Blast results into an Oracle or Mysql database.
+
+usage: orthomclLoadBlast config_file similar_seqs_file
+
+where:
+  config_file :       see below
+  similar_seqs_file : output from orthomclParseBlast
+
+EXAMPLE: orthomclSoftware/bin/orthomclLoadBlast my_orthomcl_dir/orthomcl.config my_orthomcl_dir/similarSequences.txt
+
+NOTE: the database login in the config file must have update/insert/truncate privileges on the tables specified in the config file.
+
+Sample Config File:
+
+dbVendor=oracle  (or mysql)
+dbConnectString=dbi:Oracle:orthomcl
+dbLogin=my_db_login
+dbPassword=my_db_password
+similarSequencesTable=SimilarSequences
+
+Comentario
+
+if [ $ORTHOMCLLOADBLAST == true ];	then
+    inicio=$SECONDS
+    ruta_script="programas/orthomclSoftware-v2.0.9/utilizados"
+    script="05_orthomclLoadBlast"
+    perl_script="$(echo "$ruta_script/$script")"
+    template="my_orthomcl_dir/orthomcl.config.template"
+    r1="my_orthomcl_dir/similarSequences"
+
+    salir="../../"
+    cd $r1
+    for gen in *.txt; do
+        cd $salir
+        similarSequences="$(echo "$r1/$gen")"
+        perl $perl_script $template $similarSequences
+        cd $r1
+    done
+    cd $salir
+
+    orden="ORTHOMCLLOADBLAST"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOMCLLOADBLAST=false
+    tiempo
+fi
+
+################################################################################
+
+
+
+
+
+
+
+
+
+
+################################################################################
+<<Comentario
+ORTHOFINDER_PREPARAR_FASTAS
+De los resultados del blast, crea un archivo fasta que contiene todos los hits de cada gen con cada organismo. El archivo fasta lleva como nombre al organismo.
+Comentario
+
+if [ $ORTHOFINDER_PREPARAR_FASTAS == true ];	then
+    inicio=$SECONDS
+    r1="datos/resultados_blast/nematoda/fastas"
+    r2="OrthoFinder/secuencias"
+    salir="../../../../"
+    cd $r1
+
+    for gen in *; do
+        ruta_salida="$(echo $salir$r2/$gen)"
+        mkdir -p $ruta_salida
+        cd $gen/genoma
+
+        for secuencia in *.fasta; do
+            num_gen=${secuencia%.*}
+            especie="$(grep '>' $secuencia |awk -F '|' '{print $16 }' )"
+            encabezado="$(echo -e ">$num_gen | $especie")"
+
+            while IFS= read linea; do
+
+                if [[ $linea == *">"* ]]; then
+                    echo -e "$encabezado"  >> ../../$ruta_salida/$especie.fasta
+                else
+                    echo -e "$linea" >> ../../$ruta_salida/$especie.fasta
+                fi
+
+            done < $secuencia
+        done
+        cd ../../
+    done
+    cd $salir
+
+    orden="$ORTHOFINDER_PREPARAR_FASTAS"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOFINDER_PREPARAR_FASTAS=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+ORTHOFINDER
+
+Comentario
+
+if [ $ORTHOFINDER == true ];	then
+    inicio=$SECONDS
+    ruta_script="programas/OrthoFinder"
+    r1="OrthoFinder/secuencias"
+    salir="../../"
+    cd $r1
+
+    for gen in *; do
+        $salir/$ruta_script/orthofinder -f $gen
+    done
+    cd $salir
+
+    orden="ORTHOFINDER"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    ORTHOFINDER=false
+    tiempo
+fi
+
+
+################################################################################
+
+<<Comentario
+MOVER
+
+Comentario
+
+if [ $MOVER == true ];	then
+    inicio=$SECONDS
+    salir="../../"
+    cd  OrthoFinder/secuencias
+
+    for gen in * ; do
+        mkdir -p  ../resultados/
+        cd $gen/OrthoFinder
+        for carpeta in *;do
+            mv  $carpeta $salir../resultados/$gen
+        done
+        cd ../
+        rm OrthoFinder
+        cd ../
+    done
+     cd $salir
+
+    orden="MOVER"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    MOVER=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+COPIAR_ARBOLES
+
+Comentario
+
+if [ $COPIAR_ARBOLES == true ];	then
+    inicio=$SECONDS
+    salir="../../"
+    cd  OrthoFinder/resultados
+
+    for gen in * ; do
+        cd $gen
+        #Gene_Trees Species_Tree Resolved_Gene_Trees
+        for tipo in  Gene_Trees; do
+            if [ -d "$tipo" ]; then
+                if [ -z "$(ls -A $tipo)" ]; then
+                   :
+                else
+                    out_lista="$(echo "$salir../Jupyter/datos")"
+                    mkdir -p $out_lista
+                    #echo "$gen" >> $out_lista/lista_arboles.txt
+                    cd $tipo
+                    cont=1
+                    for arbol in *.txt; do
+                        out="$(echo $salir../arboles/$gen)"
+                        Jupyter_out="$(echo ../$salir../Jupyter/datos/arboles/$gen)"
+                        mkdir -p $out
+                        mkdir -p $Jupyter_out
+                        nombre_arbol="$(echo $gen"_"$tipo"_"$cont.txt)"
+                        cp $arbol $out/$nombre_arbol
+                        cp $arbol $Jupyter_out/$nombre_arbol
+                        ((cont++))
+                    done
+                    cd ../
+                fi
+            fi
+
+        done
+        cd ../
+    done
+    cd $salir
+    #cat Jupyter/datos/lista_arboles.txt | sort | uniq > Jupyter/datos/lista_arboles_genes.txt
+    #rm  Jupyter/datos/lista_arboles.txt
+
+    orden="COPIAR_ARBOLES"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    COPIAR_ARBOLES=false
+    tiempo
+fi
+
+
+################################################################################
+
+<<Comentario
+FILTRAR_ARBOLES
+Comentario
+
+if [ $FILTRAR_ARBOLES == true ];	then
+    inicio=$SECONDS
+    salir="../../"
+    cd  OrthoFinder/arboles
+
+    for gen in * ; do
+        mkdir  -p ../listas/$gen
+        cd $gen
+        for newick  in  *.txt; do
+            newick2=${newick%.*}
+            grep '(' $newick |sed -e 's/[();]//g' |sed  's/,/\n/g' |sed  "s/$gen.*/$gen/g" >> ../../listas/$gen/$newick2.temp
+            while IFS= read linea;  do
+               organismo="$(echo $linea |sed -e "s/_*[0-9]*_$gen//g" )"
+               num_gen="$(echo $linea |sed -e "s/$organismo\_//g" )"
+               echo $organismo,$num_gen |tee -a  ../../listas/$gen/$newick2.csv >> ../../match_genoma_gen.csv
+            done < ../../listas/$gen/$newick2.temp
+            rm ../../listas/$gen/$newick2.temp
+        done
+        cd ../
+    done
+    cd $salir
+
+
+    orden="FILTRAR_ARBOLES"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    FILTRAR_ARBOLES=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+CONCATENAR_NEWICK
+Comentario
+
+if [ $CONCATENAR_NEWICK == true ];	then
+    inicio=$SECONDS
+    r1="datos/resultados_blast/nematoda/fastas"
+    Salir="../../../../"
+
+
+
+    while IFS= read linea;  do
+        num_gen="$(echo $linea |awk -F',' '{print $2}')"
+        gen="$(echo $num_gen |sed -e 's/[0-9]*_//g')"
+
+        info="$(head -1 $r1/$gen/gen/$num_gen.fasta |sed 's/>//g' |sed 's/\t|/,/g')"
+        echo -e "$num_gen,$info" >> OrthoFinder/all_newick.csv
+
+
+
+    done < OrthoFinder/match_genoma_gen.csv
+
+
+
+    orden="CONCATENAR_NEWICK"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    CONCATENAR_NEWICK=false
+    tiempo
+fi
+
+
+################################################################################
+<<Comentario
+MAPA_GENES
+Comentario
+
+if [ $MAPA_GENES == true ];	then
+    inicio=$SECONDS
+    r1="datos/resultados_blast/nematoda/fastas"
+    Salir="../../../../"
+
+    while IFS= read linea;  do
+        echo $linea |awk -F',' '{print $3 "," $1 "," $5 ","$17}'|sed 's/subject_acc //g' >> OrthoFinder/mapa_contigs.csv
+    done < OrthoFinder/all_newick.csv
+
+    orden="MAPA_GENES"
+    segundos=$(( SECONDS - inicio ))
+    TIEMPO=true
+    MAPA_GENES=false
+    tiempo
+fi
+
+
+################################################################################
