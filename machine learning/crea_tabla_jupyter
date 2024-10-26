@@ -1,0 +1,234 @@
+#! /bin/bash
+#Prepara los archivos.csv y fasta para jupyter notebook
+dataset="dataset_6"
+n=4981
+tipo_efec="no_efectores"
+
+CSV=false
+RESUMEN=true
+
+#funciones
+TIEMPO=false
+CREAR_CARPETA=false
+
+###########################################################################################
+#TIEMPO
+#Establece el tiempo en que tardó en ejecutarse cada función.
+function tiempo {
+if [ $TIEMPO == true ]; then
+	if (( $segundos > 3600 )) ; then
+		let "horas=segundos/3600"
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $horas hora(s), $minutos minuto(s) y $segundos segundo(s)" 
+	elif (( $segundos > 60 )) ; then
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $minutos minuto(s) y $segundos segundo(s)"
+	else
+		echo "$orden completado en $segundos segundos"
+	fi
+	TIEMPO=false
+fi
+}
+
+##########################################################################################
+#CREAR_CARPETA
+#crea las carpetas necesarias
+function crear_carpeta {
+	if [ $CREAR_CARPETA	= true ]; then
+		if [ ! -d  $1 ]; then
+			mkdir $1
+		fi
+		CREAR_CARPETA=false
+	fi
+}
+
+##########################################################################################
+#CSV
+#A partir de los genes descargados, crea las listas CSV y fasta para que puedan utilizarse en jupyter notebook.
+if [ $CSV == true ];  then
+	inicio=$SECONDS				
+	etiqueta=""
+	cd genes_descargados
+	for tipo in $tipo_efec; do
+		if [ $tipo == efectores ]; then
+			etiqueta="efector"                        
+		fi 
+		
+		if [ $tipo == no_efectores ]; then
+			etiqueta="no_efector"                        
+		fi
+		
+		#Crea las carpetas correspondientes
+		x="../"				
+		for crear_carp in jupyter listas_CSV_fastas $dataset $tipo; do
+			x+="$crear_carp/"
+			y="$(echo "$x" |sed 's/.$//')"
+			CREAR_CARPETA=true
+			crear_carpeta "$y"
+		done
+		
+		cd $dataset/$tipo
+		r1="jupyter/listas_CSV_fastas/$dataset/$tipo"
+		for reino in *; do
+			encabezado="accesion,etiqueta,num_amino,secuencia"
+			etiq_rei="$(echo "$reino" |sed 's/_/ /g' |awk '{print $1}')"
+			etiqueta2="$(echo -e "$etiqueta"_"$etiq_rei")"						
+			cd $reino
+			
+			z="../../../../"
+			echo -e $encabezado >> $z/$r1/$reino.temp
+			for gen in *.fa; do
+				gen2=${gen%.*}
+				num_lineas="$(wc -l $gen |awk '{print $1}')"
+				num3="$(( $num_lineas - 1 ))"
+				#Elimina los saltos de linea
+				#Elimina los espacios del string
+				#Elimina las letras "B	J O	U X Z" de las secuencias. 
+				#Algunas secuencias contienen estas letras no pertenecientes a la nomenclatura.
+				
+				sec="$(tail -"$num3" $gen |tr '\n' ' ')"					
+				for x in B	J O	U X Z; do
+					sec="$(echo "$sec" |sed "s/$x//g")"
+				done
+												
+				seq="$(echo ${sec//[[:blank:]]/})"
+				num_amino="$(echo "$seq" |wc -c )"
+				
+				#Elige secuencias menores a 3000 aminoácidos
+				#Algunas secuencias son contigs completos que contienen varios genes.
+				#La libreria svm no acepta secuencias menores a 22 nucleotidos.
+				if [[ $num_amino -lt 3000 && $num_amino -gt 22 ]]; then
+					cuerpo="$gen2,$etiqueta2,$num_amino,$seq"
+					echo -e $cuerpo  >> $z/$r1/$reino.temp
+				fi				
+			done				
+			lista="$z/$r1/$reino.temp"
+			#Elimina las secuencias repetidas													
+			echo "$(awk -F "," '!a[$4]++' $lista)" >> $z/$r1/"$reino".csv
+			rm $z/$r1/$reino.temp
+			
+			#Crea los archivos fasta
+			while IFS= read -r linea; do						
+				if [ "$linea" != "$encabezado" ]; then
+					accesion="$(echo "$linea" |awk -F',' '{print $1}')"
+					secuencia="$(echo "$linea" |awk -F',' '{print $4}')"
+					echo -e ">$accesion\n$secuencia" >> $z/$r1/"$reino".fasta
+				fi
+			done < $z/$r1/"$reino".csv
+			
+			cd ../
+		done
+		cd ../../
+	done
+	cd ../jupyter/listas_CSV_fastas/$dataset		
+		
+	#Anota las estadísticas		
+	echo -e "Estadísticas\n" >> estadisticas.txt
+	for tipo in $tipo_efec; do
+		echo "$tipo" >> estadisticas.txt
+		cd $tipo
+		for lista in *.csv;	do
+			lista2=${lista%.*}
+			num1="$( wc -l $lista |awk '{print $1}')"	
+			num2=$(( $num1 - 1 ))
+			echo -e "\t$num2\t$lista2" >> ../estadisticas.txt
+		done
+		echo -e "\n" >> ../estadisticas.txt
+		cd ../
+	done
+	cd ../../../		
+	orden="Crear lista csv"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+	CSV=false	
+fi
+
+###########################################################################################
+#RESUMEN
+#Crea listas con una cantidad de genes especificada previamente.
+if [ $RESUMEN = true ];	then		
+	inicio=$SECONDS
+	cd jupyter/listas_CSV_fastas/$dataset		
+	for tipo in $tipo_efec; do				
+		#Crea las carpetas correspondientes
+		x="../../"				
+		for crear_carp in listas_resumen $dataset $tipo; do
+			x+="$crear_carp/"
+			y="$(echo "$x" |sed 's/.$//')"
+			CREAR_CARPETA=true
+			crear_carpeta "$y"
+		done
+		x=""
+		for crear_carp in respaldo_CSV_fasta $dataset $tipo; do
+			x+="$crear_carp/"
+			y="$(echo "$x" |sed 's/.$//')"
+			CREAR_CARPETA=true
+			crear_carpeta "$y"
+		done
+						
+		cd $tipo
+		r3="listas_resumen/$dataset/$tipo"
+		z="../../../"
+		for reino in *.csv;	do						
+			#hace una copía de seguridad de las listas.
+			reino2=${reino%.*}
+			r4="respaldo_CSV_fasta/$dataset/$tipo/$reino"	
+			
+			if [ ! -f ../$r4  ];	then
+				cp $reino ../respaldo_CSV_fasta/$dataset/$tipo/$reino
+			fi
+			
+			if [ ! -f ../$r4/$reino2.fasta  ]; then
+				cp $reino2.fasta ../respaldo_CSV_fasta/$dataset/$tipo/$reino2.fasta
+			fi
+			
+			#Genera una lista con números aleatorios
+			#Estos números serán las líneas en el archivo csv del que copiaremos las  secuencias.
+			limite="$(wc -l $reino |awk '{print $1}')"
+			echo -e "$(shuf -i2-$limite -n$n |sort)" >> $z/$r3/$reino2.lista_num 
+						
+			#Agrega el encabezado						
+			head -1 $reino |tail -1 >> $z/$r3/$reino
+			sed -i '/^ *$/d' $z/$r3/$reino 
+			while IFS= read -r linea; do
+				head -$linea $reino |tail -1 >> $z/$r3/$reino
+			done < $z/$r3/$reino2.lista_num
+			rm $z/$r3/$reino2.lista_num
+			
+			#Crea el archivo fasta
+			encabezado="accesion,etiqueta,num_amino,secuencia"		
+			while IFS= read -r linea; do						
+				if [ "$linea" != "$encabezado" ]; then
+					accesion="$(echo "$linea" |awk -F',' '{print $1}')"
+					secuencia="$(echo "$linea" |awk -F',' '{print $4}')"
+					echo -e ">$accesion\n$secuencia" >> $z/$r3/$reino2.fasta					
+				fi
+			done < $z/$r3/$reino				
+		done
+		cd ../
+	done
+	cd ../../listas_resumen/$dataset
+	#Anota las estadísticas
+	echo -e "Estadísticas $dataset" >> estadisticas_$dataset.txt
+	for tipo in $tipo_efec; do
+		echo "$tipo" >> estadisticas_$dataset.txt
+		cd $tipo
+		for lista in *.csv;	do
+			lista2=${lista%.*}
+			num1="$( wc -l $lista |awk '{print $1}')"
+			num2=$(( $num1 - 1 ))			
+			echo -e "\t$num2\t$lista2" >> ../estadisticas_$dataset.txt
+		done
+		echo -e "\n" >> ../estadisticas_$dataset.txt
+		cd ../
+	done
+	cd ../../../	
+	orden="Crear listas resumen"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+	RESUMEN=false
+fi

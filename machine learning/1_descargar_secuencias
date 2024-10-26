@@ -1,0 +1,378 @@
+#! /bin/bash
+#Codificación UTF-8
+
+organismo="E_coli"
+etiqueta="todas_proteinas"
+num_hilos=16
+
+#funciones
+TIEMPO=false
+DESCARGAR_PROTEINAS=false
+EXTRAER=false
+CONCATENAR=false
+FASTA_A_CSV=false
+CONCATENAR_CSV=false
+REMOVER_SECUENCIAS=false
+REMOVER_REPETIDOS=false
+OBTENER_ACC=false
+OBTENER_ACC_NO_EF=false
+FILTRAR_CSV=false
+OBTENER_NO_EFEC=false
+
+
+##################################################################################### 
+#TIEMPO
+#Establece el tiempo en que tardó en ejecutarse cada función.
+function tiempo {
+if [ $TIEMPO == true ]; then
+	if (( $segundos > 3600 )) ; then
+		let "horas=segundos/3600"
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $horas hora(s), $minutos minuto(s) y $segundos segundo(s)" 
+	elif (( $segundos > 60 )) ; then
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $minutos minuto(s) y $segundos segundo(s)"
+	else
+		echo "$orden completado en $segundos segundos"
+	fi
+	TIEMPO=false
+fi
+}
+##################################################################################### 
+#
+<<Comentario
+Se descargan todas las proteínas de las bases de datos de Genbank y refseq.  
+Comentario
+
+if [ $DESCARGAR_PROTEINAS == true ]; then
+    inicio=$SECONDS
+    mkdir -p descargas/$organismo
+    cd descargas/$organismo
+    
+   for DB in refseq genbank; do
+	   ncbi-genome-download -s $DB -l complete --genera "Escherichia coli" -v -F protein-fasta bacteria --parallel 15
+   done
+
+    cd ../../    
+    DESCARGAR_PROTEINAS=false
+	orden="DESCARGAR_PROTEINAS"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo    
+fi
+##################################################################################### 
+<<Comentario
+Tras descargar las secuencias, mueve los archivos con terminación .faa.gz a una carpeta llamada todas_las_proteinas. Posteriormente los descomprime y los elimina tras la descompresión. Borra las carpetas refseq y genbank. 
+Comentario
+
+if [ $EXTRAER == true ]; then
+    inicio=$SECONDS
+    cd descargas/$organismo
+    mkdir -p $organismo'_todas_proteinas'
+    
+    guardar="$(echo  "$organismo"_todas_proteinas)"
+    for DB in refseq genbank; do
+			find $DB -type f  -name *.faa.gz  -exec mv  '{}'  "./$guardar" ";"
+			rm -dr $DB
+   done
+    
+	cd $organismo'_todas_proteinas'
+	for archivo in *.gz; do    
+		gzip -d $archivo
+	done
+	
+	cd ../../../
+    EXTRAER=false
+	orden="EXTRAER"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo    
+fi
+##################################################################################### 
+
+if [ $CONCATENAR ==  true ]; then
+    inicio=$SECONDS    
+    guardar="$(echo  "$organismo"_todas_proteinas)"
+    mkdir -p descargas/temporal/concatenado/$organismo
+    cd descargas/$organismo/$guardar
+    mkdir -p ../temporal
+        
+    num_fastas="$(ls |wc -l)"        
+    limite=$(( ($num_fastas / $num_hilos) +  1 ))    
+     
+    cont=0
+    cont2=1
+    for faa in *.faa; do		
+		cat $faa >> ../temporal/$guardar'_'$cont2.faa
+		((cont++))
+		if [ "$cont" == "$limite"  ]; then
+			cont=0					
+			((cont2++))
+		fi
+    done    
+    cd ../../../
+    CONCATENAR=false
+	orden="CONCATENAR"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo    
+fi
+##################################################################################### 
+#FASTA_A_CSV 
+<<Comentario
+Del archivo fasta que contiene todas las secuencias, descargado de NCBI. Se cambia el formato para que pueda ser leído como CSV, se eliminan caracteres no pertenecientes a la nomenclatura de los aminoácidos como B, J, O, U, X, Z. Finalmente se etiquetan como efector o no efector. 
+Comentario
+
+if [ $FASTA_A_CSV == true ]; then
+    inicio=$SECONDS
+
+	cd descargas/$organismo/temporal
+	mkdir - p ../csv_temporal
+	r1="../csv_temporal"	
+	salir="../../../"
+
+	for fasta in *.faa;  do			
+		#Agrega un renglón en blanco arriba de cada '>'
+		sed -i 's/>/\n>/g' $fasta 
+		destino=${fasta%.*}
+        
+		nada=""
+		titulo=""
+		secuencia=()
+		while IFS= read linea; do    
+			temp="$(echo "$linea" |grep '>')"
+			if [ "$temp" != "$nada" ]; then                    
+				titulo="$(echo "$temp" |sed -e 's/[>,;:*/]//g')"
+			fi    
+			
+			if [ "$linea" != "$nada" ] && [ "$temp" == "$nada" ] ; then
+				secuencia=("$secuencia""$linea")                        
+			fi
+			
+			if [ "$linea" == "$nada"  ] && [ "$secuencia" != "$nada" ]; then     			
+				echo "$num_amino,$titulo,$secuencia" >> $r1/$destino.csv    
+				secuencia=()
+			fi           
+		done < $fasta            
+	done
+	cd $salir
+   
+    echo "Terminado \t $buscar" >> terminados.txt
+    FASTA_A_GEN=false
+	orden="FASTA_A_CSV"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo    
+fi
+##################################################################################### 
+#CONCATENAR_CSV
+<<Comentario
+Después de crear los archivos CSV, concatena todos los archivos en uno solo y elimina todas las secuencias repetidas. 
+Comentario
+
+if [ $CONCATENAR_CSV == true ]; then
+    inicio=$SECONDS
+    mkdir -p descargas/$organismo/concatenado
+    cd descargas/$organismo/csv_temporal
+    salir="../../../"
+    
+    for lista_csv in *.csv; do
+		cat $lista_csv >> ../concatenado/$organismo'_'$etiqueta.temp
+    done
+    cd ../concatenado
+    #Elimina las secuencias repetidas													
+	echo "$(awk -F "," '!a[$3]++' $organismo'_'$etiqueta.temp)" >> $organismo'_'$etiqueta.csv
+	rm $organismo'_'$etiqueta.temp
+    cd $salir
+ 
+    CONCATENAR_CSV=false
+	orden="CONCATENAR_CSV"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################
+#REMOVER_SECUENCIAS
+<<Comentario
+Después de crear los archivos CSV, concatena todos los archivos en uno solo y elimina todas las secuencias repetidas. 
+Del archivo CSV con todas las secuencias únicas, lo compara con las listas de accesiones de los efectores. Crea un archivo CSV para cada palabra clave y un único archivo con todos los efectores y otro con todos los no efectores. En el caso de la palabra clave efector, se elimina de la lista de no efectores, pero no se incluye en los efectores. La razón es que algunas secuencias son efectores, pero no necesariamente están relacionados con la patogenicidad. 
+Comentario
+
+if [ $REMOVER_SECUENCIAS == true ]; then
+    inicio=$SECONDS
+     ruta_csv="descargas/$organismo/concatenado"
+     original="$(echo $organismo'_'$etiqueta.csv)"
+     r1="listas_csv/$organismo"
+     salir="../../"	
+     nada=""
+     
+     mkdir -p "$x"$r1/efectores
+     cd "$x"listas_accesiones/$organismo
+	    
+    for lista_seq in *.seq; do
+		nom_lista=${lista_seq%.*}
+		a="$(echo "$salir"$ruta_csv/$original)"
+		b="$(echo "$salir"$r1/$organismo'_'efectores.csv)"
+		c="$(echo "$salir"$r1/efectores/$nom_lista.csv)"
+		d="$(echo "$salir"$ruta_csv/$organismo'_quitar.temp')"
+    
+		if [ "$lista_seq" != *"efector"* ] && [ "$lista_seq" != *"effector"* ] ; then
+				while IFS= read -r linea; do
+					match="$(grep "$linea"  $a )"					
+				
+					if [ "$match" != "$nada"  ]; then
+						echo "$match" |tee -a $b |tee -a $c >> $d 
+					fi
+					
+				done< $lista_seq
+		fi
+		
+		if [ "$lista_seq" == *"efector"* ] || [ "$lista_seq" == *"effector"* ] ; then
+				while IFS= read -r linea; do
+					match="$(grep "$linea"  $a)"
+					
+					if [ "$match" != "$nada"  ]; then
+						echo "$match" |tee -a $c >> $d 
+					fi
+					
+				done< $lista_seq
+		fi
+		
+    done
+	cd "$salir"
+
+    REMOVER_SECUENCIAS=false
+	orden="REMOVER_SECUENCIAS"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+
+#####################################################################################
+#REMOVER_REPETIDOS
+<<Comentario
+En la instrucción remover secuencias, se filtraron las secuencias únicas y se obtuvo la lista csv de los efectores a partir de la lista de accesiones. Algunas accesiones estaban repetidas en varias listas, por lo que al final se filtra la lista csv para eliminar las secuencias repetidas. 
+Comentario
+
+if [ $REMOVER_REPETIDOS == true ]; then
+    inicio=$SECONDS
+    ruta_csv="descargas/$organismo/concatenado"
+    ruta_csv2="listas_csv/$organismo"
+    mkdir -p $ruta_csv2
+            
+    a1="$(echo $ruta_csv/$organismo'_'efectores.temp)"
+    a2="$(echo $ruta_csv2/$organismo'_'efectores.csv)"
+    b1="$(echo $ruta_csv/$organismo'_'quitar.temp)"
+    b2="$(echo $ruta_csv/$organismo'_'quitar.csv)"
+        
+	sort -u $a1 >> $a2
+	sort -u $b1 >> $b2
+	
+    REMOVER_REPETIDOS=false
+	orden="REMOVER_REPETIDOS"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+
+#####################################################################################
+#OBTENER_ACC
+<<Comentario
+Extrae las accesiones de las secuencias de los archivos csv. 
+Comentario
+
+if [ $OBTENER_ACC == true ]; then
+    inicio=$SECONDS    
+     
+     r1="listas_csv/$organismo"
+     r2="descargas/$organismo/concatenado"
+     r3="listas_accesiones/$organismo/utilizados"
+     mkdir -p $r3
+     
+    lista1="$(echo $organismo'_'efectores)"     
+    lista2="$(echo $organismo'_'todas_proteinas)"  
+    lista3="$(echo $organismo'_'quitar)" 
+     
+	while IFS= read linea; do
+		echo "$linea" |awk -F"," '{print $2}' |awk '{print $1}'	>> $r3/$lista1.seq
+	done < $r1/$lista1.csv
+	
+	while IFS= read linea; do
+		echo "$linea" |awk -F"," '{print $2}' |awk '{print $1}'	>> $r3/$lista2.seq
+	done < $r2/$lista2.csv
+	
+	while IFS= read linea; do
+		echo "$linea" |awk -F"," '{print $2}' |awk '{print $1}'	>> $r3/$lista3.seq
+	done < $r2/$lista3.csv
+	
+    OBTENER_ACC=false
+	orden="OBTENER_ACC"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################
+#OBTENER_ACC_NO_EF
+<<Comentario
+Obtiene las accesiones de los no efectores. Compara la accesión de la lista de todas las proteínas con la lista de efectores. Si la accesión no se encuentra en los efectores la copia a la lista de no efectores 
+Comentario
+
+if [ $OBTENER_ACC_NO_EF == true ]; then
+    inicio=$SECONDS         
+     r1="listas_accesiones/$organismo/utilizados"
+     salir="../../../"
+     nada=""
+     cd $r1
+     	
+	while IFS= read linea; do
+		acc="$(echo $linea)"
+		match="$(grep "$acc" "$organismo"_quitar.seq)"
+		
+		if [ "$match" == "$nada"  ]; then
+			echo "$acc" >> $organismo'_no_efectores.seq'
+		fi
+		
+	done < "$organismo"_todas_proteinas.seq
+	
+	cd $salir	
+    OBTENER_ACC_NO_EF=false
+	orden="OBTENER_ACC_NO_EF"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################
+#OBTENER_NO_EFEC
+<<Comentario
+Busca cada accesión de la lista no_efectores.seq en la lista todas_proteinas.csv. Sí coincide, copia la línea completa en la lista no_efectores.csv 
+Comentario
+
+if [ $OBTENER_NO_EFEC == true ]; then
+    inicio=$SECONDS     
+    ruta_csv="descargas/$organismo/concatenado"
+    #original="$(echo $organismo'_'$etiqueta.csv)"
+    a="$(echo $organismo'_'todas_proteinas.csv)"    
+    r1="listas_accesiones/$organismo/utilizados"
+    r2="listas_csv/$organismo"
+    nada=""
+    mkdir -p $r2
+
+	while IFS= read linea; do
+		acc="$(echo $linea)"
+		match="$(grep "$acc" $ruta_csv/$a)"
+		
+		if [ "$match" != "$nada"  ]; then
+			echo "$match" >> $r2/$organismo'_no_efectores.csv'
+		fi
+		
+	done < $r1/$organismo'_no_efectores.seq'	
+
+    OBTENER_NO_EFEC=false
+	orden="OBTENER_NO_EFEC"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################

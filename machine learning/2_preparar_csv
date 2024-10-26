@@ -1,0 +1,142 @@
+#! /bin/bash
+#Codificación UTF-8
+
+#organismo="Heterodera"
+#organismo="Meloidogyne"
+#organismo="Globodera"
+#organismo="archaea"
+#organismo="nematoda"
+organismo="E_coli"
+#organismo="fusarium_oxysporum"
+dataset="5"
+#dataset=1
+etiqueta="efectores no_efectores"
+n=100
+
+#funciones
+TIEMPO=false
+ETIQUETA_CSV=false
+CREAR_DATASET=false
+ 
+##################################################################################### 
+#TIEMPO
+#Establece el tiempo en que tardó en ejecutarse cada función.
+function tiempo {
+if [ $TIEMPO == true ]; then
+    if (( $segundos > 3600 )) ; then
+        let "horas=segundos/3600"
+        let "minutos=(segundos%3600)/60"
+        let "segundos=(segundos%3600)%60"
+        echo "$orden completado en $horas hora(s), $minutos minuto(s) y $segundos segundo(s)" 
+    elif (( $segundos > 60 )) ; then
+        let "minutos=(segundos%3600)/60"
+        let "segundos=(segundos%3600)%60"
+        echo "$orden completado en $minutos minuto(s) y $segundos segundo(s)"
+    else
+        echo "$orden completado en $segundos segundos"
+    fi
+    TIEMPO=false
+fi
+}
+
+##################################################################################### 
+#ETIQUETA_CSV
+<<Comentario
+De los archivos csv con todas las secuencias, elimina las lineas repetidas, luego las ordena aleatoriamente e inserta en la primera columna la etiqueta efector o no efector.
+Comentario
+
+if [ $ETIQUETA_CSV == true ]; then
+    inicio=$SECONDS
+    cd listas_csv/$organismo 
+    r1="respaldo_csv_$organismo"
+    mkdir -p $r1
+    
+	 for csv in $etiqueta; do
+		lista="$(echo $organismo'_'$csv.csv)"
+		lista2=${lista%.*}
+		
+		if [ ! -f $r1/$lista ]; then			
+			mv $lista $r1/$lista
+			sort -u "$r1/$lista" |shuf |awk -v a="$csv," 'BEGIN{FS=""}{print value a $0}' >> $lista
+			echo "La lista $lista ha sido respaldada correctamente."
+		fi
+		
+	done
+	
+    cd ../../    
+    ETIQUETA_CSV=false
+	orden="ETIQUETA_CSV"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################
+#CREAR_DATASET
+<<Comentario
+De la lista csv con efectores y no efectores, crea una copia de seguridad, si previamente había sido respaldada la omite. Se seleccionan de forma aleatoria un número determinado de secuencias de la lista csv y se almacenan en la carpeta jupyter/utilizados/organismo/dataset. Se almacenan tanto en formato csv como fasta. Posteriormente, guarda las accesiones de cada secuencia empleada un archivo de texto, y anota la cantidad de secuencias utilizadas. Finalmente, del archivo csv original, elimina las secuencias que se utilizaron para evitar que se repitan en un nuevo conjunto de datos.  
+Comentario
+
+if [ $CREAR_DATASET == true ]; then	
+	cd listas_csv/$organismo			
+	for ds in $dataset; do	
+        nom="$(echo ds"$ds"_"$organismo")"
+        nom_est="$(echo ds"$ds"_"$organismo"_estadisticas.txt)"
+        encabezado="etiqueta,num_amino,encabezado,secuencia"	
+        r1="respaldo_csv_etiqueta_$organismo"
+        r2="jupyter/$organismo/$nom"
+        r3="accesiones_utilizadas"
+        salir="../../"
+        mkdir -p "$salir"$r2
+        mkdir -p $r1
+        echo -e "#####  $organismo Dataset_$ds #####\n" >> "$salir"$r2/$nom_est
+        
+        for csv in $etiqueta; do
+            lista="$(echo $organismo'_'$csv.csv)"
+            lista_temp=${lista%.*}
+                    
+            if [ ! -f $r1/$lista ]; then			
+                cp $lista $r1/$lista
+                echo "La lista $lista ha sido respaldada correctamente."
+            fi
+            
+            mkdir -p $r3
+            limite="$( wc -l $lista |awk '{print $1}')"		
+            echo -e "$(shuf -i1-$limite -n$n |sort -g)" >>  $lista_temp.temp		
+            nombre="$(echo ds"$ds"_"$lista_temp")"
+            echo "$encabezado" >> "$salir"$r2/$nombre.csv
+            
+            while IFS= read linea; do
+                seq="$(head -$linea $lista |tail -1)"
+                accesion="$(echo "$seq" |awk -F',' '{print $3}')"
+                secuencia="$(echo "$seq" |awk -F',' '{print $4}')"
+                
+                #Crea el archivo csv
+                echo "$seq" >> "$salir"$r2/$nombre.csv
+                #Crea el archivo fasta
+                echo -e ">$accesion\n$secuencia" >> "$salir"$r2/$nombre.fasta
+                #Almacena las accesiones de las secuencias utilizadas.
+                echo "$seq" |awk -F"," '{print $3}' |awk '{print $1}'	 >> 	"$r3"/"$nombre".seq
+            done < $lista_temp.temp		
+            rm $lista_temp.temp
+            
+            #Anota la cantidad de secuencias empleadas en cada set de datos 
+            lista_ds="$(echo $salir$r2/$nombre.csv)"
+            num1="$( wc -l $lista_ds |awk '{print $1}')"
+            num2=$(( $num1 - 1 ))	
+            echo -e "$csv\tnúmero de secuencias:\t$num2" >> "$salir"$r2/$nom_est
+            
+            #Del archivo csv original elimina las secuencias que se utilizaron.
+            while IFS= read linea; do			
+                sed -i "/$linea/d" $lista
+            done < "$r3"/"$nombre".seq
+        done
+    done
+ 
+    CREAR_DATASET=false
+	orden="CREAR_DATASET"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo
+fi
+#####################################################################################
+

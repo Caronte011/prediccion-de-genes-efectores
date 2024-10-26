@@ -1,0 +1,189 @@
+#! /bin/bash
+#Codificación UTF-8
+
+#organismo="archaea"
+organismo="E_coli"
+#organismo="Globodera"
+#organismo="Heterodera"
+#organismo="Meloidogyne"
+#organismo="nematoda"
+#organismo="fusarium_oxysporum"
+#datasets="1 2 3 4 5"
+datasets=1
+etiqueta="efectores no_efectores"
+transformacion="AAC ACC PseAAC"
+indice="hidro_mass hidro mass"
+
+ETIQUETAR=false
+CREAR_ARFF=false
+CREAR_ARFF2=false
+UNIR_DATASET=false
+########################################################################
+#ETIQUETAR
+<<Comentario
+Todos los resultados del notebook transformación de datos, se guardan en archivos de texto plano. Los datos de todas las secuencias se almacenan uno junto al otro, separados por corchetes, pero forman una sola fila. Este script, reescribe los archivos y guarda en cada fila, los resultados de una sola secuencia. Elimina corchetes y apostrofes. Además, agrega la etiqueta efectores o no efectores según corresponda.
+Comentario
+
+if [ "$ETIQUETAR" == true ]; then
+    for dataset in $datasets; do
+        nombre="$(echo ds"$dataset"_"$organismo")"
+        r1="Datos/resultados/$organismo/$nombre/temp"
+        r2="transformaciones/sin_filtrar"
+        salir="../../../../../"
+        cd $r1
+        mkdir -p ../$r2
+        
+        for tran  in $transformacion; do				
+            if [ "$tran" == AAC ]; then
+                for etiq in $etiqueta; do
+                    nom2="$(echo ds"$dataset"_"$tran"_"$etiq"_"$organismo")"
+                    sed -e 's/\],/\n/g' $nom2.temp |sed -e 's/\]]//g' |sed -e 's/\[//g' |sed "s/'//g">> ../$r2/$nom2.txt
+                done			
+            fi
+            
+            if [ "$tran" == ACC ] || [ "$tran" == PseAAC ]; then		
+                for ind in $indice; do			
+                    for etiq in $etiqueta; do
+                        nom2="$(echo ds"$dataset"_"$tran"_"$ind"_"$etiq"_"$organismo")"
+                        sed -e "s/\],/,$etiq\n/g" $nom2.temp |sed -e "s/\]]/,$etiq/g" |sed -e 's/\[//g' >> ../$r2/$nom2.txt
+                    done			
+                done			
+            fi		
+        done
+        cd $salir
+    done	
+fi
+
+########################################################################
+#CREAR_ARFF 
+<<Comentario
+Después de eliminar los valores atípicos, se crea un nuevo documento con formato arff, para que pueda ser interpretado por Weka. 
+Comentario
+
+if [ "$CREAR_ARFF" == true ]; then
+    for dataset in $datasets; do
+        nombre="$(echo ds"$dataset"_"$organismo")"
+        r1="Datos/resultados/$organismo/$nombre"
+        r2="transformaciones/sin_atipicos"	
+        salir="../../../../../../"
+        cd $r1
+        mkdir -p "arff"
+        cd $r2
+                
+        for lista in *.csv; do	
+            nom_arff=${lista%.*}
+            salvar="../../arff/$nom_arff.arff"
+
+            #Cuenta la cantidad de columnas en cada archivo.
+            num_col="$(awk -F',' "{print NF}" $lista | sort -nu | tail -n 1)"
+            num=$(( $num_col- 1 ))	
+            echo "@relation $nom_arff" >> $salvar
+            
+            i=0
+            while [ "$i" -le "$num" ]; do
+
+                if [ "$i" -lt "$num" ]; then
+                    echo "@attribute $i real" >> $salvar
+                fi
+                
+                if [ "$i" == "$num" ]; then
+                    echo "@attribute class {efectores,no_efectores}" >> $salvar
+                fi
+                
+                ((i++))
+            done            
+            echo "@data" >> $salvar
+            cat $lista >> $salvar		
+        done
+        cd $salir
+    done
+fi
+
+########################################################################
+#CREAR_ARFF2
+<<Comentario
+Después de eliminar los valores atípicos, se crea un nuevo documento con formato arff, para que pueda ser interpretado por Weka. 
+Comentario
+
+if [ "$CREAR_ARFF2" == true ]; then
+    for dataset in $datasets; do
+        nombre="$(echo ds"$dataset"_"$organismo")"
+        r1="Datos/resultados/$organismo/$nombre"
+        r2="transformaciones/sin_filtrar"	
+        salir="../../../../../../"
+        nom_arff=""
+        salvar=""
+        lista=""
+        lista2=""
+        cd $r1
+        mkdir -p "arff/sin_filtrar"
+        cd $r2
+        
+        for tran in AAC ACC PseAAC; do
+
+            if [ "$tran" == AAC ]; then
+                nom_arff="$(echo ds"$dataset"_"$tran"_"$organismo")"
+                lista="$(echo ds"$dataset"_"$tran"_efectores_"$organismo".txt)"
+                lista2="$(echo ds"$dataset"_"$tran"_no_efectores_"$organismo".txt)"
+                salvar="../../arff/sin_filtrar/$nom_arff.arff"
+                
+                #Cuenta la cantidad de columnas en cada archivo.
+                num_col="$(awk -F',' "{print NF}" $lista | sort -nu | tail -n 1)"
+                num=$(( $num_col- 1 ))	
+                echo "@relation $nom_arff" >> $salvar
+                
+                i=0
+                while [ "$i" -le "$num" ]; do
+
+                    if [ "$i" -lt "$num" ]; then
+                        echo "@attribute $i real" >> $salvar
+                    fi
+                    
+                    if [ "$i" == "$num" ]; then
+                        echo "@attribute class {efectores,no_efectores}" >> $salvar
+                    fi
+                    
+                    ((i++))
+                done
+                
+                echo "@data" >> $salvar
+                cat $lista >> $salvar
+                cat $lista2 >> $salvar	
+            fi
+            
+            if [ "$tran" == ACC ] || [ "$tran" == PseAAC ]; then
+                for comp in mass hidro hidro_mass; do			
+                    nom_arff="$(echo ds"$dataset"_"$tran"_"$comp"_"$organismo")"			
+                    lista="$(echo ds"$dataset"_"$tran"_"$comp"_efectores_"$organismo".txt)"
+                    lista2="$(echo ds"$dataset"_"$tran"_"$comp"_no_efectores_"$organismo".txt)"				
+                    salvar="../../arff/sin_filtrar/$nom_arff.arff"
+                    
+                    #Cuenta la cantidad de columnas en cada archivo.
+                    num_col="$(awk -F',' "{print NF}" $lista | sort -nu | tail -n 1)"
+                    num=$(( $num_col- 1 ))	
+                    echo "@relation $nom_arff" >> $salvar
+                    
+                    i=0
+                    while [ "$i" -le "$num" ]; do
+
+                        if [ "$i" -lt "$num" ]; then
+                            echo "@attribute $i real" >> $salvar
+                        fi
+                        
+                        if [ "$i" == "$num" ]; then
+                            echo "@attribute class {efectores,no_efectores}" >> $salvar
+                        fi
+                        
+                        ((i++))
+                    done				
+                    echo "@data" >> $salvar
+                    cat $lista >> $salvar
+                    cat $lista2 >> $salvar	
+                done
+            fi
+        done
+	done
+fi
+
+########################################################################
+

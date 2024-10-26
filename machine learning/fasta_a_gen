@@ -1,0 +1,85 @@
+#! /bin/bash
+#Codificación UTF-8
+
+#funciones
+TIEMPO=false
+FASTA_A_GEN=true
+######################################
+#FASTA_A_GEN variables
+#buscar="*.fasta"
+#buscar="E_coli_prueba.fasta"
+buscar="*.fasta"
+organismo="E_coli"
+tipo="no_efectores"
+
+##################################################################################### 
+#TIEMPO
+#Establece el tiempo en que tardó en ejecutarse cada función.
+function tiempo {
+if [ $TIEMPO == true ]; then
+	if (( $segundos > 3600 )) ; then
+		let "horas=segundos/3600"
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $horas hora(s), $minutos minuto(s) y $segundos segundo(s)" 
+	elif (( $segundos > 60 )) ; then
+		let "minutos=(segundos%3600)/60"
+		let "segundos=(segundos%3600)%60"
+		echo "$orden completado en $minutos minuto(s) y $segundos segundo(s)"
+	else
+		echo "$orden completado en $segundos segundos"
+	fi
+	TIEMPO=false
+fi
+}
+##################################################################################### 
+#FASTA_A_GEN
+<<Comentario
+Las secuencias descargadas de NCBI se encuentran en un solo archivo. Este script, copia cada secuencia y la almacena en su propio archivo fasta. El archivo fasta lleva como nombre la accesión del gen. Todos los archivos se guardan en una carpeta llamada genes. 
+Comentario
+
+if [ $FASTA_A_GEN == true ]; then
+    inicio=$SECONDS
+    
+    cd secuencias/$organismo    
+    for tipo in $tipo; do   
+        cd $tipo
+        r1="secuencias/$organismo/$tipo"
+        r2="genes/$organismo/$tipo"
+        salir="../.."
+        mkdir -p ../$salir/$r2        
+        
+        for fasta in $buscar;  do
+            fasta1=${fasta%.*}
+            r3="../$salir/$r2/$fasta1"
+            mkdir -p $r3
+            encabezado=""
+            
+            while IFS= read linea; do            
+                nada=""
+                if [ "$linea" != "$nada" ]; then            
+                    ord1="s/pdb|//g; s/sp|//g; s/|/ /g"
+                    ord2="s/\./_/g; s/>//g"
+                    ord3="s/pdb|//g; s/|/ /g; s/\,/_/g; s/ /_/g; s/>//g; s/\//_/g;"
+                    ord4="s/\//_/g; s/\./_/g; s/:/_/g; s/\[//g; s/\]//g;  s/(//g; s/)//g; s/__/_/g"
+                    orden="$(echo "$ord3\;$ord4")"
+                    
+                    temp="$(echo "$linea" |grep '>')"
+                    if [ "$temp" != "$nada" ]; then
+                        encabezado="$temp"                        
+                    fi                                
+                    nombre="$(echo "$encabezado" |sed -e  "$orden"  |cut -c 1-60 )"   
+                    echo -e "$linea" >> $r3/$nombre.fasta                    
+                fi
+            done < $fasta            
+        done
+        cd ../
+    done
+    cd $salir
+    FASTA_A_GEN=false
+	orden="FASTA_A_GEN"
+	segundos=$(( SECONDS - inicio ))
+	TIEMPO=true
+	tiempo    
+fi
+##################################################################################### 
